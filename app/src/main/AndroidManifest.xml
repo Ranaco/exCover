@@ -57,6 +57,12 @@
             <meta-data
                 android:name="moto.cli.livewallpaper.homescreen"
                 android:value="true" />
+            <!-- Older clock face versions (Razr 50 on Android 16) ignore the homescreen flag: designs
+                 with their own wallpaper list only offer live wallpapers tagged with that design.
+                 Digital is the default design. -->
+            <meta-data
+                android:name="moto.cli.livewallpaper.templateId"
+                android:value="digital" />
         </service>
     </application>
 </manifest>

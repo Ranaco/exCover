@@ -56,10 +56,15 @@ software should work. If yours does or doesn't, [open an issue](../../issues) so
 | Model | Cover home | Cover lock |
 | --- | --- | --- |
 | Razr 50 Ultra (Android 17) | Works | Works |
-| Razr 50 (Android 16) | Works | Not offered: that lock screen design only lists photos |
+| Razr 50 (Android 16) | Works (Digital design) | Not possible yet |
 
-The cover lock screen depends on Motorola's lock screen designs. Their Wallpaper row only offers
-one live wallpaper, and Motorola's own come first, so on some models exCover may not appear there.
+The cover lock screen depends on Motorola's lock screen app, and it changed with Android 17. On
+Android 16 it only offers photos in the lock screen's Wallpaper row, for any live wallpaper,
+Motorola's own included. The Android 17 version added live wallpapers there, so the Razr 50
+should get cover lock support with that update.
+
+Even on Android 17, the Wallpaper row only offers one live wallpaper, and Motorola's own come
+first, so on some models exCover may not appear there.
 
 ## Set it up (one time, about a minute)
 
@@ -86,6 +91,8 @@ and choose home, lock, or both.
 | What you see | What to do |
 | --- | --- |
 | Cover lock screen shows a clock design's own art | Choose a design with a **Wallpaper** row and select the exCover card. |
+| exCover isn't in the lock screen's Wallpaper row, only photos | Your phone is on Android 16, where Motorola doesn't allow live wallpapers there. The cover home screen still works. |
+| exCover isn't in the home screen's Wallpaper row | Update exCover. On Android 16, Motorola only lists it in the Digital design (the default) or in designs without their own wallpaper set. Tap **Themes** and switch design if you use another one. |
 | Cover screen went black after an update | Android occasionally drops the lock screen after an app update. Tap **Set Wallpaper** again. exCover notices and walks you back through Motorola's editor. |
 | Cover screen is black after uninstalling | Motorola keeps pointing at the removed app. Pick a normal wallpaper in **Settings → External display**. Doing that *before* uninstalling avoids it. |
 | GIPHY search says a key is needed | You built the app yourself. See [Building](#building). |
