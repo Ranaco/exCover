@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">exCover</string>
+    <string name="wallpaper_description">Animated GIF wallpaper for the Razr external home and lock screens</string>
+</resources>

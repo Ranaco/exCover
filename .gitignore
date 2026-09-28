@@ -1,0 +1,35 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.jar
+*.class
+tools/.helper-build/
+preview-*.png
+razr-*.png
+cover-*.png
+home-*.png
+app-preview-*.png
+excover-*.png
+/assets/
+
+# Helper build output
+tools/classes-*/
+tools/inspect-classes/
+framework-device.jar
+moto-*.apk
+
+# Release signing (never commit)
+keystore.properties
+*.jks
+*.keystore
+
+# The Gradle wrapper must ship so clones can build
+!gradle/wrapper/gradle-wrapper.jar
+
+# Release artifacts
+dist/
+
+# Browser automation output
+.playwright-mcp/
