@@ -1036,25 +1036,11 @@ public final class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
         }
 
-        // Where the cover lock screen's Wallpaper row doesn't list exCover, a video saved to Photos
-        // can be picked there instead, but only if Motorola's video wallpaper is on the phone.
-        TextView videoFallback = text("Lock screen only shows photos? Save as video", 13, ACCENT, Typeface.NORMAL);
-        videoFallback.setGravity(Gravity.CENTER);
-        videoFallback.setPadding(dp(8), dp(12), dp(8), dp(2));
-        videoFallback.setOnClickListener(view -> {
-            sheet.dismiss();
-            exportLockVideo();
-        });
-        boolean coverVideo = supportsCoverVideo();
-        if (coverVideo) {
-            panel.addView(videoFallback, matchWrap());
-        }
-
         TextView cancel = textButton("Cancel");
         cancel.setOnClickListener(view -> sheet.dismiss());
         LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(46));
-        cancelParams.topMargin = dp(2);
+        cancelParams.topMargin = dp(6);
         panel.addView(cancel, cancelParams);
 
         Bitmap[] frames = new Bitmap[2];
@@ -1066,7 +1052,6 @@ public final class MainActivity extends Activity {
             shapeParams.width = onMain[0] ? mainWidth : coverWidth;
             shapePreview.setLayoutParams(shapeParams);
             shapePreview.setImageBitmap(frames[onMain[0] ? 1 : 0]);
-            videoFallback.setVisibility(onMain[0] ? View.GONE : View.VISIBLE);
         };
         coverSegment.setOnClickListener(view -> {
             onMain[0] = false;
