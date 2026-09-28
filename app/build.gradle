@@ -1,0 +1,61 @@
+plugins {
+    id "com.android.application"
+}
+
+// The GIPHY key lives in the untracked local.properties (giphy.apiKey=...), never in the repo.
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+def giphyApiKey = localProperties.getProperty("giphy.apiKey", "")
+
+// Release signing lives in the untracked keystore.properties; without it only debug builds sign.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+android {
+    namespace "com.ranaco.razrcoverwallpaper"
+    compileSdk 37
+
+    defaultConfig {
+        applicationId "com.ranaco.razrcoverwallpaper"
+        minSdk 28
+        targetSdk 36
+        versionCode 4
+        versionName "1.0.0"
+        buildConfigField "String", "GIPHY_API_KEY", "\"${giphyApiKey}\""
+    }
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            release {
+                storeFile file(keystoreProperties.getProperty("storeFile"))
+                storePassword keystoreProperties.getProperty("storePassword")
+                keyAlias keystoreProperties.getProperty("keyAlias")
+                keyPassword keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
