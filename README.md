@@ -53,6 +53,14 @@ home screen, the cover lock screen and the main screen.
 Tested on a **Motorola Razr 50 Ultra** (Android 17). Other recent Razrs with the same cover-screen
 software should work. If yours does or doesn't, [open an issue](../../issues) so the list can grow.
 
+| Model | Cover home | Cover lock |
+| --- | --- | --- |
+| Razr 50 Ultra (Android 17) | Works | Works |
+| Razr 50 | Reported | Not listed in the lock screen's Wallpaper row yet, investigating |
+
+The cover lock screen depends on Motorola's lock screen designs. Their Wallpaper row only offers
+one live wallpaper, and Motorola's own come first, so on some models exCover may not appear there.
+
 ## Set it up (one time, about a minute)
 
 Motorola decides what its cover screen shows, so the first time you pick exCover in Motorola's
