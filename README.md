@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.png" width="112" alt="exCover logo" />
+
 # exCover
 
 **Animated GIF wallpapers for your Motorola Razr's cover screen.**
