@@ -1,0 +1,60 @@
+// Folding glass over a flat picture.
+//
+// The picture lies flat, where the screen would be if the phone were open. The moving pane is a
+// sheet of glass hinged along a horizontal line and tilted `tilt` radians towards the viewer, who
+// looks from `eyeDistance` px away. Each pixel of the pane is where a ray from the eye crosses the
+// glass; the ray carries on to the picture, and what it lands on shows through. The farther the
+// glass is lifted off the picture, the more it scatters (blur) and absorbs (shade). Rays that land
+// past the picture's edge see nothing and stay black.
+//
+// Kept to simple constructs (a fixed loop, no helper functions) so it compiles on every device.
+
+uniform shader content;
+uniform float2 size;
+uniform float hinge;          // y of the hinge line, px
+uniform float side;           // -1: the pane above the hinge moves, +1: the pane below
+uniform float eyeY;           // the eye sits straight out from this line
+uniform float eyeDistance;    // px
+uniform float tilt;           // radians, 0 = flat
+uniform float blurPerLift;    // blur radius per px the glass is lifted
+uniform float shadePerRadius; // light lost per px of blur radius
+
+const float GOLDEN = 2.39996323;
+const float TAU = 6.28318531;
+
+half4 main(float2 p) {
+    float along = (p.y - hinge) * side;
+    if (tilt < 0.0005 || along <= 0.0) {
+        return content.eval(p);
+    }
+    float lift = along * sin(tilt);
+    float2 glass = float2(p.x, hinge + side * along * cos(tilt));
+    float2 eye = float2(size.x * 0.5, eyeY);
+    float depth = eyeDistance - lift;
+    if (depth <= 1.0) {
+        return half4(0.0, 0.0, 0.0, 1.0);
+    }
+    float2 hit = eye + (glass - eye) * (eyeDistance / depth);
+    float radius = blurPerLift * lift;
+    if (hit.x < -radius || hit.y < -radius || hit.x > size.x + radius || hit.y > size.y + radius) {
+        return half4(0.0, 0.0, 0.0, 1.0);
+    }
+    half shade = half(clamp(1.0 - shadePerRadius * radius, 0.0, 1.0));
+    if (radius < 0.75) {
+        return half4(content.eval(hit).rgb * shade, 1.0);
+    }
+    // Spiral of samples, turned per pixel so the pattern reads as frosted grain.
+    float taps = clamp(radius * 1.5, 8.0, 28.0);
+    float spin = fract(sin(dot(p, float2(91.7, 37.3))) * 24634.63) * TAU;
+    half3 sum = half3(0.0);
+    float count = 0.0;
+    for (int i = 0; i < 28; i++) {
+        float fi = float(i);
+        float on = step(fi + 0.5, taps);
+        float r = radius * sqrt((fi + 0.5) / taps);
+        float a = fi * GOLDEN + spin;
+        sum += content.eval(hit + r * float2(cos(a), sin(a))).rgb * half(on);
+        count += on;
+    }
+    return half4(sum / half(max(count, 1.0)) * shade, 1.0);
+}

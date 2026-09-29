@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/fold_service_description"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canTakeScreenshot="true"
+    android:notificationTimeout="1000"
+    android:settingsActivity="com.ranaco.razrcoverwallpaper.MainActivity" />

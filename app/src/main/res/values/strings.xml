@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">exCover</string>
     <string name="wallpaper_description">Animated GIF wallpaper for the Razr external home and lock screens</string>
+    <string name="fold_service_label">exCover fold animation</string>
+    <string name="fold_service_description">Turns the half of your Razr that is folding into glass while you open or close it, then settles it back into focus. The cover screen looks through to the inside. To draw that, exCover takes a picture of the screen as a fold starts and keeps it in memory for the next fold. It is never saved, shared or read for its content.</string>
 </resources>
