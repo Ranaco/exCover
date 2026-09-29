@@ -122,6 +122,13 @@ final class FoldGlass {
         return attached;
     }
 
+    /** Swaps the picture under the glass in place, e.g. a fresh one for a stale one. */
+    void setPicture(Bitmap picture, Rect region, boolean turned) {
+        if (glass != null) {
+            glass.setPicture(picture, region, turned);
+        }
+    }
+
     /**
      * @param alpha how much of the overlay shows over the live screen
      * @param dark  how far the glass has passed into shadow, 0 to 1 (the panel handover)
@@ -166,7 +173,9 @@ final class FoldGlass {
 
     private static final class GlassView extends View {
         private final RuntimeShader shader;
-        private final BitmapShader image;
+        private final int width;
+        private final int height;
+        private BitmapShader image;
         private final Paint paint = new Paint();
         private final float hinge;
         private final float side;
@@ -180,6 +189,8 @@ final class FoldGlass {
                   int width, int height, int hinge, int side, int eyeY, float pxPerMm, float maxTilt) {
             super(context);
             this.shader = shader;
+            this.width = width;
+            this.height = height;
             // Everything below is in the half-size render's pixels.
             this.hinge = hinge / RENDER_SCALE;
             this.side = side;
@@ -190,14 +201,20 @@ final class FoldGlass {
             float edgeBlur = EDGE_BLUR_PX / RENDER_SCALE;
             this.blurPerLift = edgeBlur / edgeLift;
             this.shadePerRadius = EDGE_SHADE / edgeBlur;
-            image = new BitmapShader(picture, Shader.TileMode.DECAL, Shader.TileMode.DECAL);
+            setPicture(picture, region, turned);
+        }
+
+        void setPicture(Bitmap picture, Rect region, boolean turned) {
+            BitmapShader next = new BitmapShader(picture, Shader.TileMode.DECAL, Shader.TileMode.DECAL);
             Matrix matrix = new Matrix();
             matrix.setTranslate(-region.left, -region.top);
             matrix.postScale(width / RENDER_SCALE / region.width(), height / RENDER_SCALE / region.height());
             if (turned) {
                 matrix.postRotate(180f, width / RENDER_SCALE / 2f, height / RENDER_SCALE / 2f);
             }
-            image.setLocalMatrix(matrix);
+            next.setLocalMatrix(matrix);
+            image = next;
+            invalidate();
         }
 
         void setTilt(float degrees) {

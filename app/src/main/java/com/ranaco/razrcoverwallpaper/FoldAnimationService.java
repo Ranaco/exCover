@@ -35,15 +35,13 @@ import android.view.animation.DecelerateInterpolator;
  * becomes a pane of glass: the content looks like it stays flat behind it while the glass tilts,
  * blurring and darkening the farther it lifts, then settles into focus as it lands.
  *
- * - Inner screen: the top half is the glass, over the screen's own content.
- * - Cover screen: it sits on the back of that half, so it is glass looking into the phone at the
- *   inner screen's bottom half, shown upright. Opening, the inside fades in and darkens as the
- *   cover swings away; closing, it shows the inside and settles back to its own content.
- * - Stopping partway fades the effect so the screen is back to normal; moving again picks it up.
- *
- * Both need a picture, since the system can't show one panel's content through another: one is
- * taken of the inner screen as a close starts and kept in memory for the next fold. It is never
- * saved or read for its content. Runs as an accessibility service, the only kind of app allowed
+ * - Inner screen: the top half is the glass, over a picture of the screen's own content (see
+ *   FoldGlass). The picture is taken as a close starts and kept in memory for the next fold; it
+ *   is never saved or read for its content.
+ * - Cover screen: the same glass over a picture of the cover's own screen, heaviest by the
+ *   cameras. Opening, it frosts and goes dark for the handover; closing, it settles back into
+ *   focus and dissolves into the live cover.
+ * - Stopping partway fades the effect so the screen is back to normal; moving again picks it up. Runs as an accessibility service, the only kind of app allowed
  * to draw above every window on both panels. Inspired by duo-open (github.com/marcoazeem/duo-open).
  *
  * Measured on a Razr 50 Ultra: the hinge angle arrives in 1 to 5 degree steps at 25 to 40 Hz;
@@ -62,8 +60,6 @@ public final class FoldAnimationService extends AccessibilityService implements 
     private static final float CLOSED_HINGE = 6f;
     /** Pane tilt at full frost. */
     private static final float MAX_TILT = 45f;
-    /** The cover's view inside fades in over this much of its tilt. */
-    private static final float COVER_FADE_TILT = MAX_TILT * 0.2f;
 
     /** Hinge jitter smaller than this doesn't count as moving. */
     private static final float MOVE_STEP = 2f;
@@ -80,10 +76,14 @@ public final class FoldAnimationService extends AccessibilityService implements 
     private static final long CAPTURE_WAIT_MS = 250;
     /** A fold this soon after the last picture reuses it (screenshots are rate limited). */
     private static final long RECAPTURE_AFTER_MS = 1_000;
+    /** A cover lit on a close has drawn its content by about now. */
+    private static final long COVER_REFRESH_AFTER_MS = 150;
 
     /** Hinge angles over which a panel passes into shadow before the handover. */
-    private static final float SHADOW_COVER_FROM = 55f;
-    private static final float SHADOW_COVER_TO = 88f;
+    // Fully dark well before the cover turns with gravity (it starts turning shortly before it
+    // reports 90 degrees), so the turn happens on a black screen and can't be seen.
+    private static final float SHADOW_COVER_FROM = 42f;
+    private static final float SHADOW_COVER_TO = 70f;
     /** A panel that has just lit comes up out of black over this long. */
     private static final long WAKE_FADE_MS = 220;
 
@@ -107,6 +107,10 @@ public final class FoldAnimationService extends AccessibilityService implements 
     private long innerPictureMs;
     /** Whether the lock screen was up when it was taken. */
     private boolean innerPictureLocked;
+    /** The cover as it last looked, and the rotation it was showing then. */
+    private Bitmap coverPicture;
+    private long coverPictureMs;
+    private int coverPictureRotation;
 
     private final DisplayManager.DisplayListener displayListener = new DisplayManager.DisplayListener() {
         @Override public void onDisplayAdded(int displayId) { syncDisplays(); }
@@ -206,6 +210,32 @@ public final class FoldAnimationService extends AccessibilityService implements 
         return SystemClock.uptimeMillis() - lastMoveMs < STALL_MS;
     }
 
+    private static Rect fullRegion(Bitmap picture) {
+        return new Rect(0, 0, picture.getWidth(), picture.getHeight());
+    }
+
+    /** A panel that has only just lit can still be black; such a picture is no use. */
+    private static boolean isMostlyBlack(Bitmap hardware) {
+        Bitmap small = null;
+        try {
+            small = Bitmap.createScaledBitmap(hardware.copy(Bitmap.Config.ARGB_8888, false), 24, 24, false);
+            int brightest = 0;
+            for (int y = 0; y < 24; y++) {
+                for (int x = 0; x < 24; x++) {
+                    int c = small.getPixel(x, y);
+                    brightest = Math.max(brightest, ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF));
+                }
+            }
+            return brightest < 30;
+        } catch (RuntimeException error) {
+            return false;
+        } finally {
+            if (small != null) {
+                small.recycle();
+            }
+        }
+    }
+
     private boolean keyguardLocked() {
         KeyguardManager keyguard = getSystemService(KeyguardManager.class);
         return keyguard != null && keyguard.isKeyguardLocked();
@@ -260,8 +290,8 @@ public final class FoldAnimationService extends AccessibilityService implements 
         private float previewTilt = Float.NaN;
         private boolean capturing;
         private long captureStartMs;
-        /** The cover's own picture, only for a cover fold before any inner picture exists. */
-        private Bitmap ownPicture;
+        /** A fresh picture of the cover has been asked for since it last lit up. */
+        private boolean coverRefreshed;
 
         Engine(Display display) {
             this.display = display;
@@ -327,16 +357,6 @@ public final class FoldAnimationService extends AccessibilityService implements 
             return progress;
         }
 
-        /** How much of the cover's view inside shows over its own screen. */
-        private float coverAlpha() {
-            float progress = settleProgress();
-            if (progress >= 0f) {
-                // Settling after a close: the inside gives way to the cover's own screen late.
-                return 1f - smoothstep(0.45f, 1f, progress);
-            }
-            return Math.min(1f, tilt / COVER_FADE_TILT);
-        }
-
         private boolean wanted() {
             return lit && (!Float.isNaN(previewTilt) || moving() || litMidFoldMs != 0L)
                     && targetTilt() > 0.05f;
@@ -361,6 +381,7 @@ public final class FoldAnimationService extends AccessibilityService implements 
             // A panel lighting up mid-fold starts tilted and settles, like the glass landing.
             if (moving()) {
                 litMidFoldMs = SystemClock.uptimeMillis();
+                coverRefreshed = false;
                 tilt = targetTilt();
                 visibility = 1f;
             }
@@ -392,31 +413,161 @@ public final class FoldAnimationService extends AccessibilityService implements 
                 removeGlass();
                 return;
             }
-            if (glass != null && display.getRotation() != glassRotation) {
-                // The panel turned with gravity mid-fold. Swap in glass laid out for the new
-                // rotation in this same frame, so the frost stays where it is on the phone and the
-                // panel's own content never shows through.
-                FoldGlass turned = createGlass();
-                removeGlass();
-                glass = turned;
-            }
             if (tilt > 0.05f) {
-                if (glass == null && !waitingForPicture()) {
-                    glass = createGlass();
-                }
-                if (glass != null) {
-                    if (glass.plain()) {
-                        glass.apply(tilt, shadow(), 0f);
-                    } else {
-                        float alpha = inner ? visibility : visibility * coverAlpha();
-                        glass.apply(tilt, alpha, shadow());
-                    }
+                if (inner) {
+                    drawInner();
+                } else {
+                    drawCover();
                 }
             } else {
                 removeGlass();
             }
             scheduled = true;
             Choreographer.getInstance().postFrameCallback(this);
+        }
+
+        private void drawInner() {
+            if (glass != null && display.getRotation() != glassRotation) {
+                removeGlass(); // turned mid-fold: lay the glass out again for the new rotation
+            }
+            if (glass == null && !waitingForPicture()) {
+                glass = createGlass();
+            }
+            if (glass != null) {
+                if (glass.plain()) {
+                    glass.apply(tilt, shadow(), 0f);
+                } else {
+                    glass.apply(tilt, visibility, shadow());
+                }
+            }
+        }
+
+        /**
+         * The cover frosts over a picture of its own screen, heaviest by its cameras, away from
+         * the hinge. Measured on a Razr 50 Ultra: the cover reports rotation 0 when it lights up
+         * on a close, with its hinge along the top of the screen, and turns to 180 with gravity
+         * about 90 degrees into an open, putting the hinge along the bottom. When it turns
+         * mid-fold the glass is laid out again in the same frame, so the frost never jumps on the
+         * phone; by then the cover is already dark for the handover anyway.
+         */
+        private void drawCover() {
+            int rotation = display.getRotation();
+            if (glass != null && rotation != glassRotation) {
+                FoldGlass turned = createCoverGlass(rotation);
+                removeGlass();
+                glass = turned;
+            }
+            if (glass == null && !waitingForCoverPicture()) {
+                glass = createCoverGlass(rotation);
+            }
+            if (glass != null) {
+                if (glass.plain()) {
+                    glass.apply(tilt, shadow(), 0f);
+                } else {
+                    glass.apply(tilt, visibility * coverAlpha(), shadow());
+                }
+            }
+            refreshCoverPicture();
+        }
+
+        /** After a close, the frost dissolves into the live cover late in the settle. */
+        private float coverAlpha() {
+            float progress = settleProgress();
+            return progress >= 0f ? 1f - smoothstep(0.6f, 1f, progress) : 1f;
+        }
+
+        private FoldGlass createCoverGlass(int rotation) {
+            Rect bounds = windowManager.getMaximumWindowMetrics().getBounds();
+            int width = bounds.width();
+            int height = bounds.height();
+            if (width <= 0 || height <= width) {
+                return null; // landscape: the fold isn't a horizontal line, skip
+            }
+            glassRotation = rotation;
+            if (coverPicture == null) {
+                if (litMidFoldMs == 0L) {
+                    return null;
+                }
+                FoldGlass plain = FoldGlass.plain(FoldAnimationService.this, windowManager, width, height);
+                return plain.attached() ? plain : null;
+            }
+            boolean hingeOnTop = rotation == Surface.ROTATION_0;
+            int hinge = hingeOnTop ? 0 : height;
+            FoldGlass created = new FoldGlass(FoldAnimationService.this, windowManager, width, height,
+                    coverPicture, fullRegion(coverPicture), coverPictureRotation != rotation,
+                    hinge, hingeOnTop ? 1 : -1, height / 2, pxPerMm, MAX_TILT);
+            Log.i(TAG, "display " + display.getDisplayId() + ": glass on at hinge " + angle
+                    + " rotation " + rotation + " picture rotation " + coverPictureRotation
+                    + " attached=" + created.attached());
+            return created.attached() ? created : null;
+        }
+
+        /**
+         * Opening from closed, the cover is lit and settled, so it is pictured as the fold starts,
+         * before any glass is up. True while that picture is on its way; the glass waits briefly.
+         */
+        private boolean waitingForCoverPicture() {
+            if (litMidFoldMs != 0L) {
+                return false; // just lit on a close: start from the last picture, refresh below
+            }
+            long now = SystemClock.uptimeMillis();
+            if (capturing) {
+                return now - captureStartMs < CAPTURE_WAIT_MS;
+            }
+            if (now - coverPictureMs < RECAPTURE_AFTER_MS) {
+                return false;
+            }
+            captureCover();
+            return true;
+        }
+
+        /**
+         * A cover that lights up on a close has nothing drawn for a moment, so it starts on its
+         * last picture; once it has drawn, a fresh picture is swapped in under the frost.
+         */
+        private void refreshCoverPicture() {
+            if (litMidFoldMs == 0L || coverRefreshed || capturing
+                    || SystemClock.uptimeMillis() - litMidFoldMs < COVER_REFRESH_AFTER_MS) {
+                return;
+            }
+            coverRefreshed = true;
+            captureCover();
+        }
+
+        private void captureCover() {
+            capturing = true;
+            captureStartMs = SystemClock.uptimeMillis();
+            final int rotation = display.getRotation();
+            takeScreenshot(display.getDisplayId(), getMainExecutor(), new TakeScreenshotCallback() {
+                @Override
+                public void onSuccess(ScreenshotResult result) {
+                    HardwareBuffer buffer = result.getHardwareBuffer();
+                    Bitmap picture = Bitmap.wrapHardwareBuffer(buffer, result.getColorSpace());
+                    buffer.close();
+                    capturing = false;
+                    if (picture == null || isMostlyBlack(picture)) {
+                        kick();
+                        return;
+                    }
+                    coverPicture = picture;
+                    coverPictureMs = SystemClock.uptimeMillis();
+                    coverPictureRotation = rotation;
+                    if (glass != null && glass.plain()) {
+                        removeGlass(); // woke from black with no picture: bring the glass in now
+                    } else if (glass != null) {
+                        glass.setPicture(picture, fullRegion(picture), rotation != glassRotation);
+                    }
+                    kick();
+                }
+
+                @Override
+                public void onFailure(int errorCode) {
+                    Log.i(TAG, "display " + display.getDisplayId() + ": picture unavailable: " + errorCode);
+                    capturing = false;
+                    coverPictureMs = SystemClock.uptimeMillis();
+                    kick();
+                }
+            });
         }
 
         /**
@@ -439,10 +590,7 @@ public final class FoldAnimationService extends AccessibilityService implements 
             return Math.max(approach, waking);
         }
 
-        /**
-         * The moving pane is the top half of the inner screen (the half that swings while you hold
-         * the bottom). The cover sits on the back of that half, hinged along its bottom edge.
-         */
+        /** The moving pane is the top half of the inner screen, the half that swings open. */
         private FoldGlass createGlass() {
             Rect bounds = windowManager.getMaximumWindowMetrics().getBounds();
             int width = bounds.width();
@@ -450,46 +598,28 @@ public final class FoldAnimationService extends AccessibilityService implements 
             if (width <= 0 || height <= width) {
                 return null; // landscape: the fold isn't a horizontal line, skip
             }
-            Bitmap picture;
-            Rect region;
-            if (inner) {
-                picture = innerPicture;
-                // Opening onto a screen that has locked (or unlocked) since the picture was taken
-                // would show the wrong thing, then pop: come up out of black instead.
-                if (litMidFoldMs != 0L && picture != null && innerPictureLocked != keyguardLocked()) {
-                    picture = null;
-                }
-                if (picture == null) {
-                    if (litMidFoldMs == 0L) {
-                        return null;
-                    }
-                    FoldGlass plain = FoldGlass.plain(FoldAnimationService.this, windowManager, width, height);
-                    Log.i(TAG, "display 0: waking from black at hinge " + angle);
-                    return plain.attached() ? plain : null;
-                }
-                region = new Rect(0, 0, picture.getWidth(), picture.getHeight());
-            } else if (innerPicture != null) {
-                picture = innerPicture;
-                region = new Rect(0, picture.getHeight() / 2, picture.getWidth(), picture.getHeight());
-            } else {
-                picture = ownPicture;
-                region = picture == null ? null : new Rect(0, 0, picture.getWidth(), picture.getHeight());
+            Bitmap picture = innerPicture;
+            // Opening onto a screen that has locked (or unlocked) since the picture was taken
+            // would show the wrong thing, then pop: come up out of black instead.
+            if (litMidFoldMs != 0L && picture != null && innerPictureLocked != keyguardLocked()) {
+                picture = null;
             }
             if (picture == null) {
-                return null;
+                if (litMidFoldMs == 0L) {
+                    return null;
+                }
+                FoldGlass plain = FoldGlass.plain(FoldAnimationService.this, windowManager, width, height);
+                Log.i(TAG, "display 0: waking from black at hinge " + angle);
+                return plain.attached() ? plain : null;
             }
-            // The frost is tied to the phone, not to the screen's rotation: heaviest at the edge
-            // away from the hinge. Held normally (rotation 0) that is the screen's top edge. The
-            // cover turns 180 degrees with gravity as it tips open past about 90 degrees, and
-            // then the hinge is along the screen's top, so the pane and the picture turn too.
+            Rect region = fullRegion(picture);
             int rotation = display.getRotation();
             glassRotation = rotation;
-            boolean upsideDown = rotation == Surface.ROTATION_180;
-            int hinge = inner ? height / 2 : (upsideDown ? 0 : height);
-            int side = upsideDown ? 1 : -1;
-            int eyeY = inner ? hinge : height / 2;
+            int hinge = height / 2;
+            int side = rotation == Surface.ROTATION_180 ? 1 : -1;
+            int eyeY = hinge;
             FoldGlass created = new FoldGlass(FoldAnimationService.this, windowManager, width, height,
-                    picture, region, !inner && upsideDown, hinge, side, eyeY, pxPerMm, MAX_TILT);
+                    picture, region, false, hinge, side, eyeY, pxPerMm, MAX_TILT);
             Log.i(TAG, "display " + display.getDisplayId() + ": glass on at hinge " + angle + " rotation " + rotation
                     + " tilt " + tilt + " attached=" + created.attached());
             return created.attached() ? created : null;
@@ -497,23 +627,19 @@ public final class FoldAnimationService extends AccessibilityService implements 
 
         /**
          * The inner screen is pictured as a fold starts on it while lit and settled, before any
-         * glass is up, so the picture is of the screen itself. A panel that lights up mid-fold has
-         * nothing drawn yet and reuses the last picture, which is what comes back on opening. The
-         * cover pictures itself only if no inner picture exists yet. True while a first picture is
-         * still on its way; the glass waits for it briefly.
+         * glass is up, so the picture is of the screen itself. When it lights up mid-fold it has
+         * nothing drawn yet and reuses the last picture, which is what comes back on opening.
+         * True while a first picture is still on its way; the glass waits for it briefly.
          */
         private boolean waitingForPicture() {
-            if (litMidFoldMs != 0L || (!inner && innerPicture != null)) {
+            if (litMidFoldMs != 0L) {
                 return false;
             }
             long now = SystemClock.uptimeMillis();
             if (capturing) {
                 return now - captureStartMs < CAPTURE_WAIT_MS;
             }
-            if (inner && now - innerPictureMs < RECAPTURE_AFTER_MS) {
-                return false;
-            }
-            if (!inner && ownPicture != null) {
+            if (now - innerPictureMs < RECAPTURE_AFTER_MS) {
                 return false;
             }
             capturing = true;
@@ -524,13 +650,9 @@ public final class FoldAnimationService extends AccessibilityService implements 
                     HardwareBuffer buffer = result.getHardwareBuffer();
                     Bitmap picture = Bitmap.wrapHardwareBuffer(buffer, result.getColorSpace());
                     buffer.close();
-                    if (inner) {
-                        innerPicture = picture;
-                        innerPictureMs = SystemClock.uptimeMillis();
-                        innerPictureLocked = keyguardLocked();
-                    } else {
-                        ownPicture = picture;
-                    }
+                    innerPicture = picture;
+                    innerPictureMs = SystemClock.uptimeMillis();
+                    innerPictureLocked = keyguardLocked();
                     capturing = false;
                     kick();
                 }
@@ -539,10 +661,8 @@ public final class FoldAnimationService extends AccessibilityService implements 
                 public void onFailure(int errorCode) {
                     // Secure screens (banking, DRM video) can't be pictured: no glass this time.
                     Log.i(TAG, "display " + display.getDisplayId() + ": picture unavailable: " + errorCode);
-                    if (inner) {
-                        innerPicture = null;
-                        innerPictureMs = SystemClock.uptimeMillis();
-                    }
+                    innerPicture = null;
+                    innerPictureMs = SystemClock.uptimeMillis();
                     capturing = false;
                     kick();
                 }
@@ -593,7 +713,6 @@ public final class FoldAnimationService extends AccessibilityService implements 
             Choreographer.getInstance().removeFrameCallback(this);
             scheduled = false;
             removeGlass();
-            ownPicture = null;
         }
     }
 }
