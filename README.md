@@ -108,6 +108,7 @@ renderer. exCover does not fake AOD by keeping the main screen awake.
 | exCover isn't in the lock screen's Wallpaper row, only photos | Your phone is on Android 16, where Motorola doesn't allow live wallpapers there. The cover home screen still works. |
 | exCover isn't in the home screen's Wallpaper row | Update exCover. On Android 16, Motorola only lists it in the Digital design (the default) or in designs without their own wallpaper set. Tap **Themes** and switch design if you use another one. |
 | Cover screen went black after an update | Android occasionally drops the lock screen after an app update. Tap **Set Wallpaper** again. exCover notices and walks you back through Motorola's editor. |
+| Cover AOD turns completely off | Turn off **Battery Saver**. Motorola suppresses cover AOD and powers the panel off while Battery Saver is active, even when Always-on display is enabled. |
 | Cover screen is black after uninstalling | Motorola keeps pointing at the removed app. Pick a normal wallpaper in **Settings → External display**. Doing that *before* uninstalling avoids it. |
 | Inner AOD is still black and white | This is a Motorola firmware restriction, not a missing exCover setting. The colorful exCover AOD is for the cover display. |
 | GIPHY search says a key is needed | You built the app yourself. See [Building](#building). |
