@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tells Motorola's clock face app which service builds exCover's design sessions. -->
+<clockface-service clockFaceSessionService="com.ranaco.razrcoverwallpaper.AodSessionService" />

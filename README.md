@@ -8,7 +8,8 @@
 
 The Razr has a great outside screen, and Motorola only lets you put a photo on it.
 exCover puts animated GIFs there instead, from your gallery, GIPHY or any link, on the cover
-home screen, the cover lock screen and the main screen.
+home screen, the cover lock screen and the main screen. It also adds an OLED-safe, colorful
+clock to the cover always-on display.
 
 ![Android](https://img.shields.io/badge/Android-9%2B-3DDC84?logo=android&logoColor=white)
 ![Razr](https://img.shields.io/badge/Motorola-Razr-5C2D91)
@@ -34,6 +35,8 @@ home screen, the cover lock screen and the main screen.
 ## Features
 
 - GIFs stay animated on the cover home and lock screens, not a still frame.
+- The cover always-on display gets a black, OLED-safe background with a colorful clock. The GIF
+  pauses in AOD and resumes when the cover screen wakes.
 - Find GIFs in Photos, search GIPHY inside the app, or paste any GIF link.
 - Frame them in a full-screen editor with pinch and drag. The cover screen and the taller main
   screen each get their own framing.
@@ -53,10 +56,10 @@ home screen, the cover lock screen and the main screen.
 Tested on a **Motorola Razr 50 Ultra** (Android 17). Other recent Razrs with the same cover-screen
 software should work. If yours does or doesn't, [open an issue](../../issues) so the list can grow.
 
-| Model | Cover home | Cover lock |
-| --- | --- | --- |
-| Razr 50 Ultra (Android 17) | Works | Works |
-| Razr 50 (Android 16) | Works (Digital design) | Not possible yet |
+| Model | Cover home | Cover lock | Cover AOD | Inner AOD |
+| --- | --- | --- | --- | --- |
+| Razr 50 Ultra (Android 17) | Works | Works | Color clock | Motorola monochrome only |
+| Razr 50 (Android 16) | Works (Digital design) | Not possible yet | Not tested | Motorola-controlled |
 
 The cover lock screen depends on Motorola's lock screen app, and it changed with Android 17. On
 Android 16 it only offers photos in the lock screen's Wallpaper row, for any live wallpaper,
@@ -79,12 +82,23 @@ own settings. exCover opens the right screen for you.
 4. **Lock screen:** Motorola's cover lock screen is drawn by a *design* (a clock style).
    Pick a design that has a **Wallpaper** row, then choose the **exCover** card and save.
    Designs with built-in artwork (the moon one, for example) cover up any wallpaper.
+5. **Always-on display:** in **Settings → External display → Lock screen → Themes**, choose the
+   **exCover** clock face and save. When the cover enters AOD, the GIF pauses and exCover shows its
+   low-power color clock instead.
 
 After that, pick a GIF in exCover and tap **Set Wallpaper**. The cover screen updates straight
 away.
 
 **Main screen:** **Set Wallpaper → Main Screen** opens Android's wallpaper preview. Tap **Set**
 and choose home, lock, or both.
+
+### About the inner always-on display
+
+The inner lock screen can use an exCover GIF when it wakes, but the inner *always-on display*
+cannot. On the Razr 50 Ultra's Android 17 firmware, Motorola routes inner AOD through a
+signature-protected system renderer and forces even Motorola's colorful lock styles to a
+monochrome outline while the panel is truly dozing. A normal, non-root app cannot replace that
+renderer. exCover does not fake AOD by keeping the main screen awake.
 
 ## Troubleshooting
 
@@ -95,6 +109,7 @@ and choose home, lock, or both.
 | exCover isn't in the home screen's Wallpaper row | Update exCover. On Android 16, Motorola only lists it in the Digital design (the default) or in designs without their own wallpaper set. Tap **Themes** and switch design if you use another one. |
 | Cover screen went black after an update | Android occasionally drops the lock screen after an app update. Tap **Set Wallpaper** again. exCover notices and walks you back through Motorola's editor. |
 | Cover screen is black after uninstalling | Motorola keeps pointing at the removed app. Pick a normal wallpaper in **Settings → External display**. Doing that *before* uninstalling avoids it. |
+| Inner AOD is still black and white | This is a Motorola firmware restriction, not a missing exCover setting. The colorful exCover AOD is for the cover display. |
 | GIPHY search says a key is needed | You built the app yourself. See [Building](#building). |
 
 ## Building
@@ -124,6 +139,9 @@ undocumented details let exCover use them like Motorola's own wallpapers do:
   wallpaper pickers list it next to their own.
 - The cover lock screen is painted by the active clock-face design. Selecting a live wallpaper in
   a design's Wallpaper row switches that design into "show the live wallpaper" mode.
+- A Motorola-compatible clock-face provider and session service expose exCover to the cover lock
+  screen's theme picker. During real cover doze, that service draws the low-power color clock and
+  uses Motorola's burn-in offsets.
 - One service runs separately on each screen (cover home, cover lock, main home, main lock) and
   draws the GIF chosen for that slot, with that slot's framing.
 - GIFs are decoded with `ImageDecoder` / `AnimatedImageDrawable`, so frames decode on a background
