@@ -24,11 +24,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * exCover's Motorola clock-face surface. Motorola composites third-party faces as an opaque
  * surface, so the selected lock GIF is rendered here as well as by the wallpaper service.
- * AOD deliberately uses a black background and a low-frequency coloured clock; animating the
- * whole GIF while the panel is always-on will be an explicit, battery-aware option later.
+ * In AOD the same lock GIF keeps playing behind a heavy black scrim, so the lock screen appears
+ * to dim into its always-on state instead of switching to unrelated artwork. Motorola's burn-in
+ * offset moves the complete AOD composition, and a small overscan keeps shifted edges covered.
  */
 final class AodClockView extends View implements SharedPreferences.OnSharedPreferenceChangeListener {
-    private static final float AOD_DIM = 0.62f;
+    private static final float AOD_CLOCK_DIM = 0.50f;
+    private static final float AOD_WALLPAPER_OVERSCAN = 1.04f;
     private static final float HUE_PERIOD_S = 24f;
     private static final long LOCK_TICK_MS = 100L;
     private static final long AOD_TICK_MS = 1_000L;
@@ -37,6 +39,7 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
     private final Paint time = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint date = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint lockScrim = new Paint();
+    private final Paint aodScrim = new Paint();
     private final Calendar calendar = Calendar.getInstance();
     private final float[] hsv = {0f, 0.75f, 1f};
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -63,6 +66,8 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         date.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         date.setTextAlign(Paint.Align.CENTER);
         lockScrim.setColor(0x44000000);
+        // Leave enough detail to recognise the GIF while keeping most OLED pixels near black.
+        aodScrim.setColor(0xC4000000);
     }
 
     void setAod(boolean aod) {
@@ -182,7 +187,7 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         if (!(current instanceof Animatable)) {
             return;
         }
-        if (shown && !aod && isAttachedToWindow()) {
+        if (shown && isAttachedToWindow()) {
             ((Animatable) current).start();
         } else {
             ((Animatable) current).stop();
@@ -208,10 +213,8 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
             return;
         }
         canvas.drawColor(Color.BLACK);
-        if (!aod) {
-            drawWallpaper(canvas, w, h);
-            canvas.drawRect(0, 0, w, h, lockScrim);
-        }
+        drawWallpaper(canvas, w, h);
+        canvas.drawRect(0, 0, w, h, aod ? aodScrim : lockScrim);
 
         float seconds = (android.os.SystemClock.uptimeMillis() - animationStartMs) / 1_000f;
         float hue = (seconds / HUE_PERIOD_S * 360f) % 360f;
@@ -244,6 +247,11 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
                 width, height, current.getIntrinsicWidth(), current.getIntrinsicHeight(),
                 crop.zoom, crop.focusX, crop.focusY);
         int save = canvas.save();
+        if (aod) {
+            canvas.translate(width / 2f + shiftX, height / 2f + shiftY);
+            canvas.scale(AOD_WALLPAPER_OVERSCAN, AOD_WALLPAPER_OVERSCAN);
+            canvas.translate(-width / 2f, -height / 2f);
+        }
         canvas.translate(transform.left, transform.top);
         canvas.scale(transform.scale, transform.scale);
         current.draw(canvas);
@@ -258,8 +266,8 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
     }
 
     private static int dim(int color) {
-        return Color.rgb(Math.round(Color.red(color) * AOD_DIM),
-                Math.round(Color.green(color) * AOD_DIM),
-                Math.round(Color.blue(color) * AOD_DIM));
+        return Color.rgb(Math.round(Color.red(color) * AOD_CLOCK_DIM),
+                Math.round(Color.green(color) * AOD_CLOCK_DIM),
+                Math.round(Color.blue(color) * AOD_CLOCK_DIM));
     }
 }
