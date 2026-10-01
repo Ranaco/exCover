@@ -235,7 +235,7 @@ adb shell "CLASSPATH=/data/local/tmp/set-cover.jar app_process /system/bin SetCo
 
 ## Fonts
 
-The clock themes use Outfit, Fraunces, Bricolage Grotesque and DM Mono, all under the SIL Open
+The clock themes use Outfit, Fraunces, Bricolage Grotesque and Space Mono, all under the SIL Open
 Font License 1.1. Their licence texts are in [`third_party/fonts`](third_party/fonts).
 
 ## Contributing
