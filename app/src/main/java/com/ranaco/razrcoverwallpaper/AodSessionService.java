@@ -79,6 +79,7 @@ public final class AodSessionService extends Service {
         SurfaceControlViewHost host = new SurfaceControlViewHost(this, display, new Binder());
         AodClockView view = new AodClockView(windowContext);
         view.setAod(id.style == ClockFaceProtocol.STYLE_AOD);
+        view.setFace(ClockFace.faceForTemplate(id.templateId));
         host.setView(view, config.width, config.height);
         Session session = new Session(host, view, id.style);
         ClockFaceProtocol.completeCreate(future, session, host.getSurfacePackage());
@@ -114,6 +115,14 @@ public final class AodSessionService extends Service {
                     if (config != null && config.width > 0 && config.height > 0) {
                         main.post(() -> host.relayout(config.width, config.height));
                     }
+                    break;
+                }
+                case ClockFaceProtocol.SESSION_OPTION_VALUES: {
+                    ClockFaceProtocol.OptionValues values = ClockFaceProtocol.readOptionValues(data);
+                    Log.i(ClockFaceProtocol.TAG, "design settings " + values);
+                    String font = values.keyed.get(ClockFace.FONT_OPTION);
+                    Integer color = values.color;
+                    main.post(() -> view.setClockOptions(font, color));
                     break;
                 }
                 case ClockFaceProtocol.SESSION_DESTROYED:

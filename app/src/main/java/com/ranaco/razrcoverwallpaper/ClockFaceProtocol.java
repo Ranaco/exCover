@@ -41,6 +41,7 @@ final class ClockFaceProtocol {
     // IClockFaceSession
     static final int SESSION_VISIBILITY = 1;
     static final int SESSION_VIEW_CONFIGURATION = 2;
+    static final int SESSION_OPTION_VALUES = 3;
     static final int SESSION_DESTROYED = 4;
     static final int SESSION_TIME_TICK = 6;
     static final int SESSION_STYLE = 7;
@@ -113,6 +114,55 @@ final class ClockFaceProtocol {
         public String toString() {
             return "display " + displayId + " " + width + "x" + height + " flags " + modeFlags;
         }
+    }
+
+    /** A design's current setting values as the editor reports them. */
+    static final class OptionValues {
+        /** The value of each keyed setting, by key. */
+        final java.util.Map<String, String> keyed = new java.util.HashMap<>();
+        /** The colour chosen in the editor's colour picker, or null if none has been chosen. */
+        Integer color;
+
+        @Override
+        public String toString() {
+            return keyed + " color " + (color == null ? "none" : Integer.toHexString(color));
+        }
+    }
+
+    /**
+     * Reads a typed ClockFaceOptionRuntimeValue: the template id, an array of indexed values, an
+     * optional colour, then an array of key/value pairs. Each array element and the colour are
+     * written with their class name first.
+     */
+    static OptionValues readOptionValues(Parcel in) {
+        OptionValues values = new OptionValues();
+        try {
+            if (in.readInt() == 0) {
+                return values;
+            }
+            in.readString(); // template id
+            int indexed = in.readInt();
+            for (int i = 0; i < indexed; i++) {
+                if (in.readString() != null) { // IndexedRuntimeValue: key, index
+                    in.readString();
+                    in.readInt();
+                }
+            }
+            if (in.readString() != null) { // ColorRuntimeValue: static flag, colour
+                in.readByte();
+                values.color = in.readInt();
+            }
+            int pairs = in.readInt();
+            for (int i = 0; i < pairs; i++) {
+                if (in.readString() != null) { // KeyValueRuntimeValue: key, value
+                    String key = in.readString();
+                    values.keyed.put(key, in.readString());
+                }
+            }
+        } catch (RuntimeException error) {
+            Log.w(TAG, "could not read design setting values", error);
+        }
+        return values;
     }
 
     /** Asks the host to go ahead and create the session it just announced. */

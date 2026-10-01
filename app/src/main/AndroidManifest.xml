@@ -67,10 +67,13 @@
 
         <!-- exCover's cover lock screen design (and its AOD state), for Motorola's clock face app.
              It lists the design from this provider, then binds the two services below to draw
-             it; both permissions are held by the clock face app. -->
+             it; both permissions are held by the clock face app. The clock face app starts
+             before the first unlock after a restart, so these must be available then too, or it
+             drops exCover's design until the next app update. -->
         <provider
             android:name=".AodDesignProvider"
             android:authorities="${applicationId}.clockfaces"
+            android:directBootAware="true"
             android:exported="true"
             android:readPermission="com.motorola.permission.READ_CLOCK_FACE_OPTIONS">
             <intent-filter>
@@ -80,6 +83,7 @@
 
         <service
             android:name=".AodClockFaceService"
+            android:directBootAware="true"
             android:exported="true"
             android:permission="com.motorola.permission.BIND_CLOCK_FACE_SERVICE">
             <intent-filter>
@@ -92,6 +96,7 @@
 
         <service
             android:name=".AodSessionService"
+            android:directBootAware="true"
             android:exported="true"
             android:permission="com.motorola.permission.BIND_CLOCK_FACE_SERVICE">
             <intent-filter>
