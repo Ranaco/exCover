@@ -22,7 +22,7 @@ import java.util.Locale;
  * design as it runs. The editor's thumbnails are drawn here too, so they match the cover.
  *
  * Each face pairs a bundled font with its own layout: Airy (Outfit, light and centred), Classic
- * (Fraunces, a soft serif), Poster (Bricolage Grotesque, heavy stacked digits) and Mono (DM Mono,
+ * (Fraunces, a soft serif), Poster (Bricolage Grotesque, heavy stacked digits) and Mono (Space Mono,
  * compact at the top). Layouts come from measured glyphs inside a cover-shaped box and shrink to
  * fit, so they stay clean whatever size the host gives the surface.
  */
@@ -43,8 +43,8 @@ final class ClockFace {
 
     /** The editor's font setting and its choices; each face starts in its own font. */
     static final String FONT_OPTION = "font";
-    static final String[] FONT_KEYS = {"outfit", "fraunces", "bricolage", "dm_mono"};
-    private static final String[] FACE_FONTS = {"outfit", "fraunces", "bricolage", "dm_mono", "outfit"};
+    static final String[] FONT_KEYS = {"outfit", "fraunces", "bricolage", "space_mono"};
+    private static final String[] FACE_FONTS = {"outfit", "fraunces", "bricolage", "space_mono", "outfit"};
 
     /** The cover lock screen's shape; layouts are designed against it. */
     private static final float DESIGN_ASPECT = 1272f / 1080f;
@@ -57,18 +57,30 @@ final class ClockFace {
     private static final int HEAVY = 2;
 
     /**
-     * A bundled font with variable-font settings for large digits at each weight, and for the
-     * small date and labels. A face keeps its weight whichever font it is drawn in.
+     * A bundled font with settings for large digits at each weight, and for the small date and
+     * labels: variable-font axes, or a separate file per weight for a static family. A face keeps
+     * its weight whichever font it is drawn in.
      */
     private static final class Font {
-        final int resource;
+        /** The font file for each weight, and for the date and labels. */
+        final int[] resources;
+        final int labelResource;
         final String[] timeAxes;
         final String labelAxes;
 
         Font(int resource, String light, String regular, String heavy, String labelAxes) {
-            this.resource = resource;
+            this.resources = new int[]{resource, resource, resource};
+            this.labelResource = resource;
             this.timeAxes = new String[]{light, regular, heavy};
             this.labelAxes = labelAxes;
+        }
+
+        /** A static family with a regular and a bold file. */
+        Font(int regular, int bold) {
+            this.resources = new int[]{regular, regular, bold};
+            this.labelResource = regular;
+            this.timeAxes = new String[]{"", "", ""};
+            this.labelAxes = "";
         }
     }
 
@@ -84,9 +96,9 @@ final class ClockFace {
             "'wght' 460, 'wdth' 90, 'opsz' 96",
             "'wght' 780, 'wdth' 75, 'opsz' 96",
             "'wght' 560, 'wdth' 100, 'opsz' 14");
-    private static final Font DM_MONO = new Font(R.font.dm_mono, "", "", "", "");
+    private static final Font SPACE_MONO = new Font(R.font.space_mono, R.font.space_mono_bold);
     /** In the same order as FONT_KEYS. */
-    private static final Font[] FONTS = {OUTFIT, FRAUNCES, BRICOLAGE, DM_MONO};
+    private static final Font[] FONTS = {OUTFIT, FRAUNCES, BRICOLAGE, SPACE_MONO};
     /** How heavy each face draws its time, in the order of KEYS. */
     private static final int[] FACE_WEIGHTS = {LIGHT, REGULAR, HEAVY, REGULAR, LIGHT};
 
@@ -156,8 +168,9 @@ final class ClockFace {
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
         paint.setColor(Color.WHITE);
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTypeface(typeface(context, font));
-        String axes = font.timeAxes[FACE_WEIGHTS[indexOf(face)]];
+        int weight = FACE_WEIGHTS[indexOf(face)];
+        paint.setTypeface(typeface(context, font.resources[weight]));
+        String axes = font.timeAxes[weight];
         paint.setFontVariationSettings(axes.isEmpty() ? null : axes);
         fit(paint, "123", height * 0.62f, width * 0.86f);
         paint.getTextBounds("0", 0, 1, bounds);
@@ -165,16 +178,16 @@ final class ClockFace {
         return bitmap;
     }
 
-    private static Typeface typeface(Context context, Font font) {
+    private static Typeface typeface(Context context, int resource) {
         synchronized (TYPEFACES) {
-            Typeface cached = TYPEFACES.get(font.resource);
+            Typeface cached = TYPEFACES.get(resource);
             if (cached == null) {
                 try {
-                    cached = context.getResources().getFont(font.resource);
+                    cached = context.getResources().getFont(resource);
                 } catch (RuntimeException error) {
                     cached = Typeface.DEFAULT;
                 }
-                TYPEFACES.put(font.resource, cached);
+                TYPEFACES.put(resource, cached);
             }
             return cached;
         }
@@ -187,9 +200,8 @@ final class ClockFace {
     private void useFont(Font faceFont, int weight) {
         Font chosen = chosenFont(font);
         Font use = chosen != null ? chosen : faceFont;
-        Typeface typeface = typeface(context, use);
-        time.setTypeface(typeface);
-        date.setTypeface(typeface);
+        time.setTypeface(typeface(context, use.resources[weight]));
+        date.setTypeface(typeface(context, use.labelResource));
         String timeAxes = use.timeAxes[weight];
         time.setFontVariationSettings(timeAxes.isEmpty() ? null : timeAxes);
         date.setFontVariationSettings(use.labelAxes.isEmpty() ? null : use.labelAxes);
@@ -314,7 +326,7 @@ final class ClockFace {
     /** Mono: a compact time, a short rule and the date, at the top left. */
     private void drawMono(Canvas canvas, int width, int height, float unit, String clock,
             Calendar calendar) {
-        useFont(DM_MONO, REGULAR);
+        useFont(SPACE_MONO, REGULAR);
         String day = upper(DateFormat.format("EEE dd MMM", calendar));
         time.setTextAlign(Paint.Align.LEFT);
         date.setTextAlign(Paint.Align.LEFT);
