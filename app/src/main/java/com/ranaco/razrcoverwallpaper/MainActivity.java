@@ -373,12 +373,16 @@ public final class MainActivity extends Activity {
         LinearLayout aod = group();
         content.addView(aod, matchWrap());
         ToggleView showGif = switchRow(aod, "Show asset in AOD", WallpaperStore.aodEnabled(this));
-        aod.addView(separator(dp(16)));
-        View looks = buildAodLooks(showGif.isChecked());
-        aod.addView(looks);
+        // The looks only matter with the asset on, so they appear with it and slide away without.
+        LinearLayout lookArea = new LinearLayout(this);
+        lookArea.setOrientation(LinearLayout.VERTICAL);
+        lookArea.addView(separator(dp(16)));
+        lookArea.addView(buildAodLooks());
+        lookArea.setVisibility(showGif.isChecked() ? View.VISIBLE : View.GONE);
+        aod.addView(lookArea, matchWrap());
         showGif.setListener(checked -> {
             WallpaperStore.saveAodEnabled(this, checked);
-            looks.animate().alpha(checked ? 1f : 0.35f).setDuration(150).start();
+            reveal(lookArea, checked);
         });
         TextView aodNote = text("AOD shows a still frame of your lock asset with the exCover "
                 + "clock face. Previews are brighter than the cover.", 13, SECONDARY, Typeface.NORMAL);
@@ -521,11 +525,10 @@ public final class MainActivity extends Activity {
      * it saves, over a strip of all five. Previews are the lock asset's first frame toned the way
      * the cover tones it, brightened because the cover is far dimmer than a phone screen.
      */
-    private View buildAodLooks(boolean enabled) {
+    private View buildAodLooks() {
         LinearLayout section = new LinearLayout(this);
         section.setOrientation(LinearLayout.VERTICAL);
         section.setPadding(dp(16), dp(16), dp(16), dp(14));
-        section.setAlpha(enabled ? 1f : 0.35f);
 
         // The chosen look, large, with its name, description and battery saving beside it.
         LinearLayout hero = new LinearLayout(this);
@@ -686,6 +689,68 @@ public final class MainActivity extends Activity {
             });
         });
         return section;
+    }
+
+    /**
+     * Shows or hides {@code view} the way iOS opens a settings group: the space grows or folds
+     * on a soft ease-out curve while the contents fade and settle into place. Flipping it again
+     * mid-way reverses from wherever it is.
+     */
+    private void reveal(View view, boolean show) {
+        Object running = view.getTag(R.id.reveal_animator);
+        if (running instanceof ValueAnimator) {
+            ((ValueAnimator) running).cancel();
+        }
+        if (show == (view.getVisibility() == View.VISIBLE) && running == null) {
+            return;
+        }
+        ViewGroup.LayoutParams params = view.getLayoutParams();
+        int from = view.getVisibility() == View.VISIBLE ? view.getHeight() : 0;
+        int width = ((View) view.getParent()).getWidth();
+        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int to = show ? view.getMeasuredHeight() : 0;
+        float startAlpha = view.getVisibility() == View.VISIBLE ? view.getAlpha() : 0f;
+        float startShift = view.getVisibility() == View.VISIBLE ? view.getTranslationY() : -dp(10);
+        view.setVisibility(View.VISIBLE);
+        params.height = from;
+        view.setLayoutParams(params);
+
+        ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
+        animator.setDuration(show ? 420 : 320);
+        animator.setInterpolator(new android.view.animation.PathInterpolator(0.32f, 0.72f, 0f, 1f));
+        animator.addUpdateListener(animation -> {
+            float t = (float) animation.getAnimatedValue();
+            params.height = Math.round(from + (to - from) * t);
+            view.setLayoutParams(params);
+            // Showing, the contents fade in once there is room; hiding, they fade out first.
+            float fade = show ? Math.max(0f, (t - 0.15f) / 0.85f) : Math.min(1f, t / 0.6f);
+            view.setAlpha(show ? startAlpha + (1f - startAlpha) * fade : startAlpha * (1f - fade));
+            view.setTranslationY(show ? startShift * (1f - t) : startShift + (-dp(10) - startShift) * t);
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            private boolean cancelled;
+
+            @Override
+            public void onAnimationCancel(android.animation.Animator animation) {
+                cancelled = true;
+            }
+
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                view.setTag(R.id.reveal_animator, null);
+                if (cancelled) {
+                    return;
+                }
+                params.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                view.setLayoutParams(params);
+                view.setTranslationY(0f);
+                view.setAlpha(1f);
+                view.setVisibility(show ? View.VISIBLE : View.GONE);
+            }
+        });
+        view.setTag(R.id.reveal_animator, animator);
+        animator.start();
     }
 
     private ToggleView switchRow(LinearLayout group, String label, boolean checked) {
