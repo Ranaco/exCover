@@ -73,12 +73,14 @@ software should work. If yours does or doesn't, [open an issue](../../issues) so
 | Model | Cover home | Cover lock | Cover AOD | Inner AOD |
 | --- | --- | --- | --- | --- |
 | Razr 50 Ultra (Android 17) | Works | Works | Your GIF, in six looks | Motorola monochrome only |
-| Razr 50 (Android 16) | Works (Digital design) | Not possible yet | Not tested | Motorola-controlled |
+| Razr 50 (Android 16) | Works (Digital design) | Not possible yet | Needs Android 17 | Motorola-controlled |
 
 The cover lock screen depends on Motorola's lock screen app, and it changed with Android 17. On
 Android 16 it only offers photos in the lock screen's Wallpaper row, for any live wallpaper,
 Motorola's own included. The Android 17 version added live wallpapers there, so the Razr 50
 should get cover lock support with that update.
+
+The exCover clock designs and the GIF on the cover AOD also need Android 17 or later.
 
 Even on Android 17, the Wallpaper row only offers one live wallpaper, and Motorola's own come
 first, so on some models exCover may not appear there.
