@@ -26,6 +26,11 @@ plain clock.
 <img src="docs/screenshot-giphy.jpg" width="24%" alt="Searching GIPHY inside exCover" />
 <img src="docs/screenshot-set.jpg" width="24%" alt="Choosing the cover or main screen" />
 
+<img src="docs/screenshot-themes.jpg" width="32%" alt="exCover's clock designs in Motorola's cover Themes picker" />
+<img src="docs/screenshot-aod.jpg" width="32%" alt="Choosing an AOD look in exCover" />
+
+<sub>exCover's designs next to Motorola's in the cover Themes picker, and the AOD looks in exCover.</sub>
+
 </div>
 
 > [!NOTE]
