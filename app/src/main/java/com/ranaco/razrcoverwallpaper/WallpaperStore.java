@@ -158,6 +158,28 @@ public final class WallpaperStore {
         preferences(context).edit().putBoolean("set_on_main", onMain).apply();
     }
 
+    static final String KEY_AOD_ENABLED = "aod_enabled";
+    static final String KEY_AOD_LOOK = "aod_look";
+
+    /** The look the cover AOD gives the lock GIF's frame; see {@link AodLook}. */
+    public static String aodLook(Context context) {
+        String look = preferences(context).getString(KEY_AOD_LOOK, AodLook.VIGNETTE);
+        return AodLook.isLook(look) ? look : AodLook.VIGNETTE;
+    }
+
+    public static void saveAodLook(Context context, String look) {
+        preferences(context).edit().putString(KEY_AOD_LOOK, look).apply();
+    }
+
+    /** Whether the cover AOD shows the dimmed lock GIF; off leaves it black. */
+    public static boolean aodEnabled(Context context) {
+        return preferences(context).getBoolean(KEY_AOD_ENABLED, true);
+    }
+
+    public static void saveAodEnabled(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean(KEY_AOD_ENABLED, enabled).apply();
+    }
+
     public static ImportResult importGif(
             Context context,
             InputStream input,

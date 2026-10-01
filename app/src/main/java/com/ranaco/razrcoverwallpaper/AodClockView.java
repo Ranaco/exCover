@@ -1,20 +1,27 @@
 package com.ranaco.razrcoverwallpaper;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Color;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.Shader;
-import android.graphics.Typeface;
 import android.graphics.drawable.Animatable;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.UserManager;
 import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.View;
+import android.view.animation.DecelerateInterpolator;
 
 import java.util.Calendar;
 import java.util.concurrent.ExecutorService;
@@ -23,29 +30,59 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * exCover's Motorola clock-face surface. Motorola composites third-party faces as an opaque
- * surface, so the selected lock GIF is rendered here as well as by the wallpaper service.
- * In AOD the same lock GIF keeps playing behind a heavy black scrim, so the lock screen appears
- * to dim into its always-on state instead of switching to unrelated artwork. Motorola's burn-in
- * offset moves the complete AOD composition, and a small overscan keeps shifted edges covered.
+ * surface and uses the lock-screen choice for AOD too, so this one view draws both states.
+ * Awake, it shows the selected lock GIF with a clock and date in the manner of Motorola's
+ * Digital face. In AOD the same GIF stays, toned down for an OLED panel, with no clock, so the
+ * lock screen dims into its always-on state. Motorola's burn-in offset moves the AOD image,
+ * and a small overscan keeps shifted edges covered.
+ *
+ * Going into AOD the clock fades out while the GIF dims and grows slightly, all in one short
+ * ease-out; waking plays it back a little faster. Motorola holds the cover awake for about half a
+ * second when it changes into AOD, so the transition is kept inside that.
+ *
+ * Coming from the cover home screen, Motorola fades to black itself and shows the design already
+ * in AOD, so there is nothing to transition from. The AOD then fades up out of black while the
+ * GIF grows into its AOD size.
+ *
+ * The awake clock is drawn by {@link ClockFace}: the face is the design chosen in Motorola's
+ * picker, and its font and colour come from Motorola's design editor as they change.
+ *
+ * The AOD frame is toned rather than covered with a flat scrim, in one of the looks in
+ * {@link AodLook} chosen in exCover. Each takes shadows to true black, which is off on OLED.
+ *
+ * About two seconds into AOD, Android suspends the cover panel and it holds its last frame, so the
+ * GIF pauses once AOD settles rather than drawing frames nobody sees. AOD can also be turned off
+ * in exCover, which dims all the way to black.
+ *
+ * Motorola's clock face app starts before the phone is first unlocked after a restart, while
+ * exCover's settings and GIF are still encrypted. Until then the design draws the default clock
+ * on black, and it loads everything as soon as the phone is unlocked.
  */
 final class AodClockView extends View implements SharedPreferences.OnSharedPreferenceChangeListener {
-    private static final float AOD_CLOCK_DIM = 0.50f;
-    private static final float AOD_WALLPAPER_OVERSCAN = 1.04f;
-    private static final float HUE_PERIOD_S = 24f;
+    /** How much larger the GIF is in AOD; also covers the edges when burn-in shifts it. */
+    private static final float AOD_SCALE = 1.06f;
+    private static final long TO_AOD_MS = 450L;
+    private static final long FROM_AOD_MS = 320L;
+    private static final long REVEAL_MS = 500L;
     private static final long LOCK_TICK_MS = 100L;
-    private static final long AOD_TICK_MS = 1_000L;
     private static final int MAX_DECODE_SIDE = 2048;
+    /** The clock is gone by this point of the transition, before the GIF settles. */
+    private static final float CLOCK_FADE_END = 0.6f;
 
-    private final Paint time = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint date = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint lockScrim = new Paint();
-    private final Paint aodScrim = new Paint();
+    private final Paint scrim = new Paint();
+    private final AodLook look = new AodLook();
+    private String lookKey = AodLook.VIGNETTE;
+    /** The progress the wallpaper's tone was last set for; NaN forces it to be set again. */
+    private float toneProgress = Float.NaN;
+    private final ClockFace clockFace = new ClockFace(getContext());
+    private String clockStyle;
     private final Calendar calendar = Calendar.getInstance();
-    private final float[] hsv = {0f, 0.75f, 1f};
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService decoder = Executors.newSingleThreadExecutor();
     private final AtomicInteger loadGeneration = new AtomicInteger();
-    private final SharedPreferences preferences;
+    /** Null until the phone has been unlocked once since it started. */
+    private SharedPreferences preferences;
+    private BroadcastReceiver unlockReceiver;
     private final Runnable tick = this::tick;
 
     private Drawable wallpaper;
@@ -53,35 +90,181 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
     private boolean aod;
     private boolean shown = true;
     private boolean listening;
+    private boolean loading;
     private float shiftX;
     private float shiftY;
-    private final long animationStartMs = android.os.SystemClock.uptimeMillis();
+    /** 0 on the lock screen, 1 in AOD; everything that differs between them follows this. */
+    private float aodProgress;
+    private ValueAnimator transition;
+    /** 0 is black, 1 fully shown; only runs when the design appears straight into AOD. */
+    private float reveal = 1f;
+    private boolean revealPending;
+    private ValueAnimator revealing;
+    private boolean aodEnabled;
 
     AodClockView(Context context) {
         super(context);
         setBackgroundColor(Color.BLACK);
-        preferences = WallpaperStore.preferences(context);
-        time.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        time.setTextAlign(Paint.Align.CENTER);
-        date.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        date.setTextAlign(Paint.Align.CENTER);
-        lockScrim.setColor(0x44000000);
-        // Leave enough detail to recognise the GIF while keeping most OLED pixels near black.
-        aodScrim.setColor(0xC4000000);
+        scrim.setColor(Color.BLACK);
+        aodEnabled = true;
+        clockStyle = ClockFace.AIRY;
+        clockFace.setColor(Color.WHITE);
+        if (isUnlocked()) {
+            loadSettings();
+        }
     }
 
     void setAod(boolean aod) {
         if (this.aod != aod) {
             Log.i(ClockFaceProtocol.TAG, "design now " + (aod ? "AOD" : "lock screen"));
         }
+        boolean changed = this.aod != aod;
         this.aod = aod;
+        if (changed) {
+            if (!aod) {
+                cancelReveal();
+            }
+            animateTo(aod ? 1f : 0f);
+        }
         updateWallpaperAnimation();
         invalidate();
         scheduleTick();
     }
 
+    private void animateTo(float target) {
+        if (transition != null) {
+            transition.cancel();
+        }
+        if (!isAttachedToWindow() || !shown) {
+            aodProgress = target; // nothing on screen to animate
+            if (target >= 1f) {
+                revealPending = true; // it will appear already in AOD
+                reveal = 0f;
+            }
+            return;
+        }
+        transition = ValueAnimator.ofFloat(aodProgress, target);
+        transition.setDuration(target > aodProgress ? TO_AOD_MS : FROM_AOD_MS);
+        transition.setInterpolator(new DecelerateInterpolator(1.6f));
+        transition.addUpdateListener(animation -> {
+            aodProgress = (float) animation.getAnimatedValue();
+            invalidate();
+        });
+        transition.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                updateWallpaperAnimation(); // AOD pauses once it has settled
+            }
+        });
+        transition.start();
+    }
+
+    /** Fades the AOD up from black; waits for the GIF so it doesn't fade in an empty frame. */
+    private void startRevealIfReady() {
+        if (!revealPending || !shown || !isAttachedToWindow() || loading) {
+            return;
+        }
+        revealPending = false;
+        if (revealing != null) {
+            revealing.cancel();
+        }
+        revealing = ValueAnimator.ofFloat(reveal, 1f);
+        revealing.setDuration(REVEAL_MS);
+        revealing.setInterpolator(new DecelerateInterpolator(1.6f));
+        revealing.addUpdateListener(animation -> {
+            reveal = (float) animation.getAnimatedValue();
+            invalidate();
+        });
+        revealing.start();
+    }
+
+    private void cancelReveal() {
+        revealPending = false;
+        if (revealing != null) {
+            revealing.cancel();
+            revealing = null;
+        }
+        reveal = 1f;
+    }
+
+    private boolean isUnlocked() {
+        UserManager users = getContext().getSystemService(UserManager.class);
+        return users == null || users.isUserUnlocked();
+    }
+
+    /** Reads exCover's settings; only possible once the phone has been unlocked. */
+    private void loadSettings() {
+        preferences = WallpaperStore.preferences(getContext());
+        aodEnabled = WallpaperStore.aodEnabled(getContext());
+        lookKey = WallpaperStore.aodLook(getContext());
+        toneProgress = Float.NaN;
+    }
+
+    void setFace(String face) {
+        clockStyle = face;
+        invalidate();
+    }
+
+    /** The font and colour chosen in Motorola's design editor; null keeps the face's own. */
+    void setClockOptions(String font, Integer color) {
+        clockFace.setFont(font);
+        clockFace.setColor(color != null ? color : Color.WHITE);
+        invalidate();
+    }
+
+    /** Picks up the settings and GIF the moment the phone is first unlocked. */
+    private void watchForUnlock() {
+        if (unlockReceiver != null) {
+            return;
+        }
+        unlockReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                stopWatchingForUnlock();
+                if (preferences == null && isAttachedToWindow()) {
+                    loadSettings();
+                    startListening();
+                    loadWallpaper();
+                    updateWallpaperAnimation();
+                    invalidate();
+                }
+            }
+        };
+        IntentFilter unlocked = new IntentFilter(Intent.ACTION_USER_UNLOCKED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getContext().registerReceiver(unlockReceiver, unlocked, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            getContext().registerReceiver(unlockReceiver, unlocked);
+        }
+    }
+
+    private void stopWatchingForUnlock() {
+        if (unlockReceiver != null) {
+            getContext().unregisterReceiver(unlockReceiver);
+            unlockReceiver = null;
+        }
+    }
+
+    private void startListening() {
+        if (!listening && preferences != null) {
+            preferences.registerOnSharedPreferenceChangeListener(this);
+            listening = true;
+        }
+    }
+
     void setShown(boolean shown) {
+        boolean appearing = shown && !this.shown;
         this.shown = shown;
+        if (!shown && aod) {
+            // Next time it shows it will already be in AOD, so fade it back up then.
+            if (revealing != null) {
+                revealing.cancel();
+            }
+            revealPending = true;
+            reveal = 0f;
+        } else if (appearing) {
+            startRevealIfReady();
+        }
         updateWallpaperAnimation();
         if (shown) {
             scheduleTick();
@@ -99,17 +282,30 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (!listening) {
-            preferences.registerOnSharedPreferenceChangeListener(this);
-            listening = true;
+        if (preferences == null && isUnlocked()) {
+            loadSettings();
         }
-        loadWallpaper();
+        if (preferences == null) {
+            watchForUnlock();
+        } else {
+            startListening();
+            loadWallpaper();
+        }
         scheduleTick();
+        startRevealIfReady();
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        if (transition != null) {
+            transition.cancel();
+            aodProgress = aod ? 1f : 0f;
+        }
+        if (revealing != null) {
+            revealing.cancel();
+        }
         main.removeCallbacks(tick);
+        stopWatchingForUnlock();
         if (listening) {
             preferences.unregisterOnSharedPreferenceChangeListener(this);
             listening = false;
@@ -132,12 +328,21 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         } else if (key.startsWith(WallpaperStore.TARGET_LOCK + "_") && key.contains("crop")) {
             crop = WallpaperStore.crop(getContext(), WallpaperStore.TARGET_LOCK, false);
             invalidate();
+        } else if (key.equals(WallpaperStore.KEY_AOD_LOOK)) {
+            lookKey = WallpaperStore.aodLook(getContext());
+            toneProgress = Float.NaN;
+            invalidate();
+        } else if (key.equals(WallpaperStore.KEY_AOD_ENABLED)) {
+            aodEnabled = WallpaperStore.aodEnabled(getContext());
+            updateWallpaperAnimation();
+            invalidate();
         }
     }
 
     private void loadWallpaper() {
         crop = WallpaperStore.crop(getContext(), WallpaperStore.TARGET_LOCK, false);
         int generation = loadGeneration.incrementAndGet();
+        loading = true;
         decoder.execute(() -> {
             Drawable decoded = null;
             try {
@@ -157,22 +362,26 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
                     wallpaper.setCallback(null);
                 }
                 wallpaper = result;
+                toneProgress = Float.NaN; // the new GIF needs its tone set
                 if (result != null) {
                     result.setBounds(0, 0, result.getIntrinsicWidth(), result.getIntrinsicHeight());
                     result.setCallback(this);
                 }
+                loading = false;
                 updateWallpaperAnimation();
                 invalidate();
+                startRevealIfReady();
             });
         });
     }
 
+    /** Keeps the awake clock current. AOD has no clock, and the GIF redraws itself. */
     private void tick() {
-        if (!shown || !isAttachedToWindow()) {
+        if (!shown || !isAttachedToWindow() || aod) {
             return;
         }
         invalidate();
-        main.postDelayed(tick, aod ? AOD_TICK_MS : LOCK_TICK_MS);
+        main.postDelayed(tick, LOCK_TICK_MS);
     }
 
     private void scheduleTick() {
@@ -187,7 +396,8 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         if (!(current instanceof Animatable)) {
             return;
         }
-        if (shown && isAttachedToWindow()) {
+        boolean still = aod && aodProgress >= 1f;
+        if (shown && isAttachedToWindow() && !still) {
             ((Animatable) current).start();
         } else {
             ((Animatable) current).stop();
@@ -212,33 +422,37 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         if (w == 0 || h == 0) {
             return;
         }
+        float progress = aodProgress;
         canvas.drawColor(Color.BLACK);
-        drawWallpaper(canvas, w, h);
-        canvas.drawRect(0, 0, w, h, aod ? aodScrim : lockScrim);
-
-        float seconds = (android.os.SystemClock.uptimeMillis() - animationStartMs) / 1_000f;
-        float hue = (seconds / HUE_PERIOD_S * 360f) % 360f;
-        int first = color(hue, 1f);
-        int second = color(hue + 120f, 1f);
-
-        calendar.setTimeInMillis(System.currentTimeMillis());
-        String pattern = DateFormat.is24HourFormat(getContext()) ? "HH:mm" : "h:mm";
-        String clock = DateFormat.format(pattern, calendar).toString();
-        String day = DateFormat.format("EEE d MMM", calendar).toString();
-
-        float cx = w / 2f + (aod ? shiftX : 0f);
-        float cy = h * 0.46f + (aod ? shiftY : 0f);
-        time.setTextSize(w * 0.30f);
-        date.setTextSize(w * 0.055f);
-        time.setShader(new LinearGradient(cx - w * 0.35f, 0f, cx + w * 0.35f, 0f,
-                aod ? dim(first) : first, aod ? dim(second) : second, Shader.TileMode.MIRROR));
-        date.setShader(null);
-        date.setColor(aod ? dim(color(hue + 60f, 0.6f)) : color(hue + 60f, 0.55f));
-        canvas.drawText(clock, cx, cy, time);
-        canvas.drawText(day.toUpperCase(), cx, cy + date.getTextSize() * 1.8f, date);
+        applyTone(progress);
+        drawWallpaper(canvas, w, h, progress * reveal);
+        look.drawOverlay(canvas, lookKey, w, h, progress);
+        // Fading up from black, or a turned-off AOD dimming the rest of the way to black.
+        float black = Math.max(1f - reveal, aodEnabled ? 0f : progress);
+        if (black > 0f) {
+            scrim.setAlpha(Math.round(255 * black));
+            canvas.drawRect(0, 0, w, h, scrim);
+        }
+        // The always-on display is just the dimmed GIF; the clock fades out on the way there.
+        float clockAlpha = 1f - Math.min(1f, progress / CLOCK_FADE_END);
+        if (clockAlpha > 0f) {
+            calendar.setTimeInMillis(System.currentTimeMillis());
+            clockFace.draw(canvas, clockStyle, w, h, clockAlpha, calendar,
+                    DateFormat.is24HourFormat(getContext()));
+        }
     }
 
-    private void drawWallpaper(Canvas canvas, int width, int height) {
+    /** Tones the GIF along the chosen look's curve for {@code progress}. */
+    private void applyTone(float progress) {
+        Drawable current = wallpaper;
+        if (current == null || progress == toneProgress) {
+            return;
+        }
+        toneProgress = progress;
+        current.setColorFilter(new ColorMatrixColorFilter(AodLook.curve(lookKey, progress)));
+    }
+
+    private void drawWallpaper(Canvas canvas, int width, int height, float progress) {
         Drawable current = wallpaper;
         if (current == null || current.getIntrinsicWidth() <= 0 || current.getIntrinsicHeight() <= 0) {
             return;
@@ -247,9 +461,10 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
                 width, height, current.getIntrinsicWidth(), current.getIntrinsicHeight(),
                 crop.zoom, crop.focusX, crop.focusY);
         int save = canvas.save();
-        if (aod) {
-            canvas.translate(width / 2f + shiftX, height / 2f + shiftY);
-            canvas.scale(AOD_WALLPAPER_OVERSCAN, AOD_WALLPAPER_OVERSCAN);
+        if (progress > 0f) { // AOD size, reached as the transition or reveal runs
+            float scale = lerp(1f, AOD_SCALE, progress);
+            canvas.translate(width / 2f + shiftX * progress, height / 2f + shiftY * progress);
+            canvas.scale(scale, scale);
             canvas.translate(-width / 2f, -height / 2f);
         }
         canvas.translate(transform.left, transform.top);
@@ -258,16 +473,7 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         canvas.restoreToCount(save);
     }
 
-    private int color(float hue, float saturation) {
-        hsv[0] = ((hue % 360f) + 360f) % 360f;
-        hsv[1] = saturation;
-        hsv[2] = 1f;
-        return Color.HSVToColor(hsv);
-    }
-
-    private static int dim(int color) {
-        return Color.rgb(Math.round(Color.red(color) * AOD_CLOCK_DIM),
-                Math.round(Color.green(color) * AOD_CLOCK_DIM),
-                Math.round(Color.blue(color) * AOD_CLOCK_DIM));
+    private static float lerp(float from, float to, float t) {
+        return from + (to - from) * t;
     }
 }

@@ -14,6 +14,9 @@ import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Paint;
 import android.graphics.drawable.Drawable;
 import android.graphics.Outline;
 import android.graphics.Typeface;
@@ -88,6 +91,8 @@ public final class MainActivity extends Activity {
     private static final int ERROR = 0xFFFF453A;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    /** Redraws the AOD look previews from the current lock GIF. */
+    private Runnable aodPreviewRefresh;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<View> interactiveViews = new ArrayList<>();
     private GlassBackdropView backdrop;
@@ -139,6 +144,14 @@ public final class MainActivity extends Activity {
             linkInput.post(this::importFromLink);
         } else {
             refreshPreview(null, false);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (aodPreviewRefresh != null) {
+            aodPreviewRefresh.run(); // the lock GIF may have changed while away
         }
     }
 
@@ -353,6 +366,25 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
         interactiveViews.add(importLink);
 
+        buildClockSection(content);
+
+        // Read by exCover's cover clock face, which draws the cover AOD.
+        content.addView(sectionHeader("Cover AOD"), sectionHeaderParams());
+        LinearLayout aod = group();
+        content.addView(aod, matchWrap());
+        ToggleView showGif = switchRow(aod, "Show asset in AOD", WallpaperStore.aodEnabled(this));
+        aod.addView(separator(dp(16)));
+        View looks = buildAodLooks(showGif.isChecked());
+        aod.addView(looks);
+        showGif.setListener(checked -> {
+            WallpaperStore.saveAodEnabled(this, checked);
+            looks.animate().alpha(checked ? 1f : 0.35f).setDuration(150).start();
+        });
+        TextView aodNote = text("AOD shows a still frame of your lock asset with the exCover "
+                + "clock face. Previews are brighter than the cover.", 13, SECONDARY, Typeface.NORMAL);
+        aodNote.setPadding(dp(16), dp(6), dp(16), 0);
+        content.addView(aodNote, matchWrap());
+
         // The scroll view fills the viewport, so this spacer pushes the footer to the very bottom.
         content.addView(new View(this), new LinearLayout.LayoutParams(0, 0, 1f));
         content.addView(footer(), footerParams());
@@ -459,6 +491,218 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
         interactiveViews.add(row);
         return row;
+    }
+
+    /**
+     * The cover clock is customised where Motorola's own designs are: each exCover face is a
+     * design in Motorola's lock screen picker, with its font and colour in the design editor.
+     */
+    private void buildClockSection(LinearLayout content) {
+        content.addView(sectionHeader("Cover clock"), sectionHeaderParams());
+        LinearLayout clock = group();
+        content.addView(clock, matchWrap());
+        View customise = sourceRow(R.drawable.ic_settings, "Customise clock face");
+        customise.setOnClickListener(view -> {
+            try {
+                startActivity(new Intent("com.motorola.intent.action.SECONDARY_CLOCKFACE_PICKER"));
+            } catch (Exception error) {
+                openExternalDisplaySettings();
+            }
+        });
+        clock.addView(customise);
+        TextView note = text("Pick an exCover face (Airy, Classic, Poster, Mono or GIF only) in "
+                + "Themes, then set its font and colour.", 13, SECONDARY, Typeface.NORMAL);
+        note.setPadding(dp(16), dp(6), dp(16), 0);
+        content.addView(note, matchWrap());
+    }
+
+    /**
+     * The AOD looks: a large preview of the chosen one with what it does and how much battery
+     * it saves, over a strip of all five. Previews are the lock asset's first frame toned the way
+     * the cover tones it, brightened because the cover is far dimmer than a phone screen.
+     */
+    private View buildAodLooks(boolean enabled) {
+        LinearLayout section = new LinearLayout(this);
+        section.setOrientation(LinearLayout.VERTICAL);
+        section.setPadding(dp(16), dp(16), dp(16), dp(14));
+        section.setAlpha(enabled ? 1f : 0.35f);
+
+        // The chosen look, large, with its name, description and battery saving beside it.
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.HORIZONTAL);
+        hero.setGravity(Gravity.CENTER_VERTICAL);
+        section.addView(hero, matchWrap());
+        int heroWidth = dp(120);
+        int heroHeight = Math.round(heroWidth * 1272f / 1080f);
+        ImageView heroImage = new ImageView(this);
+        heroImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        heroImage.setBackground(rounded(Color.BLACK, dp(18)));
+        heroImage.setClipToOutline(true);
+        GradientDrawable heroEdge = new GradientDrawable();
+        heroEdge.setCornerRadius(dp(18));
+        heroEdge.setStroke(Math.max(1, dp(1)), 0x24FFFFFF);
+        heroImage.setForeground(heroEdge);
+        hero.addView(heroImage, new LinearLayout.LayoutParams(heroWidth, heroHeight));
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        infoParams.leftMargin = dp(16);
+        hero.addView(info, infoParams);
+        TextView lookName = text("", 20, LABEL, Typeface.NORMAL);
+        lookName.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        info.addView(lookName, matchWrap());
+        TextView lookAbout = text("", 14, SECONDARY, Typeface.NORMAL);
+        lookAbout.setLineSpacing(0, 1.1f);
+        LinearLayout.LayoutParams aboutParams = matchWrap();
+        aboutParams.topMargin = dp(4);
+        info.addView(lookAbout, aboutParams);
+        TextView savingLabel = text("BATTERY SAVING", 11, TERTIARY, Typeface.NORMAL);
+        savingLabel.setLetterSpacing(0.06f);
+        LinearLayout.LayoutParams savingParams = matchWrap();
+        savingParams.topMargin = dp(14);
+        info.addView(savingLabel, savingParams);
+        LinearLayout meter = new LinearLayout(this);
+        meter.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams meterParams = matchWrap();
+        meterParams.topMargin = dp(6);
+        info.addView(meter, meterParams);
+        View[] bars = new View[4];
+        for (int i = 0; i < bars.length; i++) {
+            bars[i] = new View(this);
+            LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(dp(22), dp(6));
+            barParams.rightMargin = dp(4);
+            meter.addView(bars[i], barParams);
+        }
+
+        // Every look, three to a row; the ring sits just outside each image, like a frame.
+        LinearLayout row = null;
+        String[] selected = {WallpaperStore.aodLook(this)};
+        FrameLayout[] frames = new FrameLayout[AodLook.KEYS.length];
+        ImageView[] previews = new ImageView[AodLook.KEYS.length];
+        TextView[] names = new TextView[AodLook.KEYS.length];
+        Bitmap[] toned = new Bitmap[AodLook.KEYS.length];
+        Runnable showSelected = () -> {
+            for (int i = 0; i < previews.length; i++) {
+                boolean on = AodLook.KEYS[i].equals(selected[0]);
+                GradientDrawable ring = new GradientDrawable();
+                ring.setCornerRadius(dp(13));
+                ring.setStroke(dp(2), on ? ACCENT : Color.TRANSPARENT);
+                frames[i].setBackground(ring);
+                names[i].setTextColor(on ? LABEL : SECONDARY);
+                names[i].setTypeface(Typeface.create(on ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
+                if (on) {
+                    lookName.setText(AodLook.LABELS[i]);
+                    lookAbout.setText(AodLook.ABOUT[i]);
+                    for (int bar = 0; bar < bars.length; bar++) {
+                        bars[bar].setBackground(rounded(bar < AodLook.SAVING[i] ? SUCCESS : 0x26FFFFFF, dp(3)));
+                    }
+                    heroImage.setImageBitmap(toned[i]);
+                }
+            }
+        };
+        for (int i = 0; i < AodLook.KEYS.length; i++) {
+            String key = AodLook.KEYS[i];
+            if (i % 3 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rowParams = matchWrap();
+                rowParams.topMargin = dp(i == 0 ? 18 : 10);
+                section.addView(row, rowParams);
+            }
+            LinearLayout tile = new LinearLayout(this);
+            tile.setOrientation(LinearLayout.VERTICAL);
+            tile.setGravity(Gravity.CENTER_HORIZONTAL);
+            tile.setPadding(dp(6), 0, dp(6), 0);
+            tile.setContentDescription(AodLook.LABELS[i] + " AOD look");
+            FrameLayout frame = new FrameLayout(this);
+            frame.setPadding(dp(4), dp(4), dp(4), dp(4));
+            ImageView preview = new ImageView(this);
+            preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            preview.setBackground(rounded(Color.BLACK, dp(9)));
+            preview.setClipToOutline(true);
+            frame.addView(preview, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            // Keep the cover's shape at whatever width the tile gets.
+            frame.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                int width = right - left;
+                int wanted = Math.round((width - dp(8)) * 1272f / 1080f) + dp(8);
+                if (width > 0 && bottom - top != wanted) {
+                    ViewGroup.LayoutParams params = view.getLayoutParams();
+                    params.height = wanted;
+                    view.post(() -> view.setLayoutParams(params));
+                }
+            });
+            tile.addView(frame, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(80)));
+            TextView name = text(AodLook.LABELS[i], 13, SECONDARY, Typeface.NORMAL);
+            name.setGravity(Gravity.CENTER);
+            name.setSingleLine(true);
+            name.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams nameParams = matchWrap();
+            nameParams.topMargin = dp(4);
+            tile.addView(name, nameParams);
+            tile.setOnClickListener(view -> {
+                selected[0] = key;
+                WallpaperStore.saveAodLook(this, key);
+                showSelected.run();
+            });
+            frames[i] = frame;
+            previews[i] = preview;
+            names[i] = name;
+            row.addView(tile, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        showSelected.run();
+
+        aodPreviewRefresh = () -> worker.execute(() -> {
+            Bitmap frame = null;
+            try {
+                frame = GifDecoder.frame(GifDecoder.source(this, WallpaperStore.TARGET_LOCK),
+                        heroWidth, heroHeight, WallpaperStore.crop(this, WallpaperStore.TARGET_LOCK, false));
+            } catch (Exception ignored) {
+                // No lock asset yet: the previews stay black.
+            }
+            Bitmap[] made = new Bitmap[AodLook.KEYS.length];
+            if (frame != null) {
+                AodLook look = new AodLook();
+                Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+                for (int i = 0; i < made.length; i++) {
+                    made[i] = Bitmap.createBitmap(heroWidth, heroHeight, Bitmap.Config.ARGB_8888);
+                    Canvas canvas = new Canvas(made[i]);
+                    canvas.drawColor(Color.BLACK);
+                    ColorMatrix brighter = new ColorMatrix();
+                    brighter.setScale(2.4f, 2.4f, 2.4f, 1f);
+                    brighter.preConcat(AodLook.curve(AodLook.KEYS[i], 1f));
+                    paint.setColorFilter(new ColorMatrixColorFilter(brighter));
+                    canvas.drawBitmap(frame, 0, 0, paint);
+                    look.drawOverlay(canvas, AodLook.KEYS[i], heroWidth, heroHeight, 1f);
+                }
+            }
+            runOnUiThread(() -> {
+                for (int i = 0; i < previews.length; i++) {
+                    toned[i] = made[i];
+                    previews[i].setImageBitmap(made[i]);
+                }
+                showSelected.run();
+            });
+        });
+        return section;
+    }
+
+    private ToggleView switchRow(LinearLayout group, String label, boolean checked) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), 0, dp(12), 0);
+        row.addView(text(label, 17, LABEL, Typeface.NORMAL), new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        ToggleView toggle = new ToggleView(this, SUCCESS);
+        toggle.setChecked(checked, false);
+        toggle.setContentDescription(label);
+        row.addView(toggle);
+        row.setOnClickListener(view -> toggle.setChecked(!toggle.isChecked(), true));
+        group.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
+        return toggle;
     }
 
     private ImageView rowIcon(int icon) {
