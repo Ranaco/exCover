@@ -221,7 +221,7 @@ cover home and lock slots directly. You shouldn't need it, but it's handy for te
 ```powershell
 .\tools\build-helper.ps1
 adb push .\tools\set-cover.jar /data/local/tmp/set-cover.jar
-adb shell "CLASSPATH=/data/local/tmp/set-cover.jar app_process /system/bin SetCoverWallpaper set home com.ranaco.razrcoverwallpaper com.ranaco.razrcoverwallpaper.GifWallpaperService"
+adb shell "CLASSPATH=/data/local/tmp/set-cover.jar app_process /system/bin SetCoverWallpaper set home com.ranaco.excover com.ranaco.razrcoverwallpaper.GifWallpaperService"
 ```
 
 </details>

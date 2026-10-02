@@ -22,7 +22,7 @@ android {
     compileSdk 37
 
     defaultConfig {
-        applicationId "com.ranaco.razrcoverwallpaper"
+        applicationId "com.ranaco.excover"
         minSdk 28
         targetSdk 36
         versionCode 9

@@ -38,4 +38,4 @@ If this policy changes, the new version will be posted here with a new date.
 
 ## Contact
 
-Questions about privacy: rana@codedecoders.io
+Questions about privacy: ranasatyamraj@gmail.com

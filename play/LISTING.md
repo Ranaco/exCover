@@ -7,14 +7,14 @@ rebuilds them).
 
 | Field | Value |
 |---|---|
-| App name (30) | `exCover: Cover Screen GIFs` |
-| Package | `com.ranaco.razrcoverwallpaper` |
+| App name (30) | `exCover` |
+| Package | `com.ranaco.excover` |
 | Default language | English (United States) |
 | App or game | App |
 | Free or paid | Free |
 | Category | Personalization |
 | Tags | Wallpapers, Live wallpapers, Personalization |
-| Contact email | rana@codedecoders.io |
+| Contact email | ranasatyamraj@gmail.com |
 | Website | https://github.com/Ranaco/exCover |
 | Privacy policy | https://github.com/Ranaco/exCover/blob/main/PRIVACY.md |
 
@@ -59,7 +59,7 @@ exCover is an independent app and isn't made or endorsed by Motorola. GIFs from 
 |---|---|
 | App icon 512×512 | `icon-512.png` |
 | Feature graphic 1024×500 | `feature-graphic.png` |
-| Phone screenshots (1080×2160) | `screenshot-1.png` … `screenshot-6.png` |
+| Phone screenshots (1080×1920) | `screenshot-1.png` … `screenshot-7.png` |
 
 ## Store settings
 
