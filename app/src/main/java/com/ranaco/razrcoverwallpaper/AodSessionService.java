@@ -78,7 +78,7 @@ public final class AodSessionService extends Service {
         }
         SurfaceControlViewHost host = new SurfaceControlViewHost(this, display, new Binder());
         AodClockView view = new AodClockView(windowContext);
-        view.setAod(id.style == ClockFaceProtocol.STYLE_AOD);
+        view.setStyleAod(id.style == ClockFaceProtocol.STYLE_AOD);
         view.setFace(ClockFace.faceForTemplate(id.templateId));
         host.setView(view, config.width, config.height);
         Session session = new Session(host, view, id.style);
@@ -138,7 +138,7 @@ public final class AodSessionService extends Service {
                     int nextStyle = data.readInt();
                     Log.i(ClockFaceProtocol.TAG, "style " + nextStyle);
                     style = nextStyle;
-                    main.post(() -> view.setAod(nextStyle == ClockFaceProtocol.STYLE_AOD));
+                    main.post(() -> view.setStyleAod(nextStyle == ClockFaceProtocol.STYLE_AOD));
                     break;
                 }
                 case ClockFaceProtocol.SESSION_STYLE_ANIMATION: {
@@ -157,7 +157,7 @@ public final class AodSessionService extends Service {
                         // A newly-created LOCKED_AOD session can legitimately receive aod=false
                         // here while the panel is already in doze. Never let that generic icon
                         // update downgrade a style-1 session back to the awake lock layout.
-                        main.post(() -> view.setAod(
+                        main.post(() -> view.setStyleAod(
                                 style == ClockFaceProtocol.STYLE_AOD || aod));
                     }
                     break;

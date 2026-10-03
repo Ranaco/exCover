@@ -17,6 +17,7 @@ import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.UserManager;
 import android.text.format.DateFormat;
 import android.util.Log;
@@ -101,6 +102,10 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
     private boolean revealPending;
     private ValueAnimator revealing;
     private boolean aodEnabled;
+    /** What Motorola last asked for: the AOD design, or the lock screen. */
+    private boolean styleAod;
+    /** Hears the phone truly waking or sleeping, to settle a lock-screen request made mid-doze. */
+    private BroadcastReceiver wakeReceiver;
 
     AodClockView(Context context) {
         super(context);
@@ -112,6 +117,27 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         if (isUnlocked()) {
             loadSettings();
         }
+    }
+
+    /**
+     * Motorola's request for the AOD design (true) or the lock screen (false). A lock-screen
+     * request that comes while the phone is still dozing (a touch on the power-button fingerprint
+     * sensor lights the cover without waking it) keeps the dim AOD look; the lock screen follows
+     * once the phone actually wakes.
+     */
+    void setStyleAod(boolean aod) {
+        styleAod = aod;
+        applyStyle();
+    }
+
+    private void applyStyle() {
+        setAod(styleAod || !awake());
+    }
+
+    /** Awake, not dozing: false while AOD is up, even with the screen lit by a fingerprint touch. */
+    private boolean awake() {
+        PowerManager power = getContext().getSystemService(PowerManager.class);
+        return power == null || power.isInteractive();
     }
 
     void setAod(boolean aod) {
@@ -293,10 +319,25 @@ final class AodClockView extends View implements SharedPreferences.OnSharedPrefe
         }
         scheduleTick();
         startRevealIfReady();
+        if (wakeReceiver == null) {
+            wakeReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    applyStyle(); // woke for real, or went back to sleep: settle the look
+                }
+            };
+            IntentFilter wake = new IntentFilter(Intent.ACTION_SCREEN_ON);
+            wake.addAction(Intent.ACTION_SCREEN_OFF);
+            getContext().registerReceiver(wakeReceiver, wake);
+        }
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        if (wakeReceiver != null) {
+            getContext().unregisterReceiver(wakeReceiver);
+            wakeReceiver = null;
+        }
         if (transition != null) {
             transition.cancel();
             aodProgress = aod ? 1f : 0f;
